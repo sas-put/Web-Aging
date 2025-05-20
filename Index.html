@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard Aging Piutang Lengkap</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+  th, td { border: 1px solid #999; padding: 8px; text-align: center; }
+  th { background-color: #eee; }
+  tr.macet { background-color: #fdd; }
+  .filter-section { margin-bottom: 15px; }
+  input[type="text"], input[type="date"], select { padding: 6px; margin-right: 10px; }
+  button { padding: 6px 12px; margin-right: 5px; cursor: pointer; }
+  #chartContainer { width: 100%; height: 300px; margin-top: 15px; }
+</style>
+</head>
+<body>
+<h2>Dashboard Aging Piutang Lengkap</h2>
+
+<div class="filter-section">
+  <input type="text" id="searchInput" placeholder="Cari Kode/Nama Pelanggan..." onkeyup="filterTable()" />
+  <select id="statusFilter" onchange="filterTable()">
+    <option value="semua">Semua Status</option>
+    <option value="Lunas">Lunas</option>
+    <option value="Belum Lunas">Belum Lunas</option>
+  </select>
+</div>
+
+<table id="dataTable">
+  <thead>
+    <tr>
+      <th>No</th>
+      <th>Tanggal</th>
+      <th>Kode Pelanggan</th>
+      <th>Nama Pelanggan</th>
+      <th>Tanggal Invoice</th>
+      <th>Jatuh Tempo</th>
+      <th>Tanggal Pembayaran</th>
+      <th>Nilai Piutang (Rp)</th>
+      <th>Status</th>
+      <th>Umur Piutang (hari)</th>
+      <th>Kategori Aging</th>
+      <th>Aksi</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- Data akan tampil di sini -->
+  </tbody>
+</table>
+
+<button onclick="showAddForm()">Tambah Data</button>
+<button onclick="exportToExcel()">Export ke Excel</button>
+
+<!-- Form Tambah/Edit -->
+<div id="formContainer" style="display:none; margin-top:20px;">
+  <h3 id="formTitle">Tambah Data</h3>
+  <form id="dataForm" onsubmit="return submitForm(event)">
+    <input type="hidden" id="editIndex" value="-1" />
+    <label>
+      Tanggal:<br />
+      <input type="date" id="tanggal" required />
+    </label><br /><br />
+    <label>
+      Kode Pelanggan:<br />
+      <input type="text" id="kodePelanggan" required />
+    </label><br /><br />
+    <label>
+      Nama Pelanggan:<br />
+      <input type="text" id="namaPelanggan" required />
+    </label><br /><br />
+    <label>
+      Tanggal Invoice:<br />
+      <input type="date" id="tanggalInvoice" required />
+    </label><br /><br />
+    <label>
+      Jatuh Tempo:<br />
+      <input type="date" id="jatuhTempo" required />
+    </label><br /><br />
+    <label>
+      Tanggal Pembayaran:<br />
+      <input type="date" id="tanggalPembayaran" />
+    </label><br /><br />
+    <label>
+      Nilai Piutang (Rp):<br />
+      <input type="number" id="nilaiPiutang" required min="0" />
+    </label><br /><br />
+    <label>
+      Status:<br />
+      <select id="status" required>
+        <option value="">--Pilih Status--</option>
+        <option value="Lunas">Lunas</option>
+        <option value="Belum Lunas">Belum Lunas</option>
+      </select>
+    </label><br /><br />
+    <button type="submit">Simpan</button>
+    <button type="button" onclick="hideForm()">Batal</button>
+  </form>
+</div>
+
+<div id="chartContainer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  // --- PASTE URL APPS SCRIPT WEB APP DI SINI ---
+  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdRgq69naUuWm0aL82yrdWd2A1m6T2GuAI3bYBiYSIBIVs_SFHfZSNee74p5DMdunl/exec'; // <-- GANTI dengan URL Web Apps kamu (pakai petik satu)
+
+  let dataList = [];
+
+  // Fungsi fetch data dari Google Sheets via Apps Script
+  async function fetchData() {
+    try {
+      const response = await fetch(SCRIPT_URL);
+      const json = await response.json();
+      dataList = json.data || [];
+      renderTable();
+      renderChart();
+    } catch (error) {
+      console.error('Gagal fetch data:', error);
+      alert('Gagal mengambil data dari server.');
+    }
+  }
+
+  // Render tabel data
+  function renderTable() {
+    const tbody = document.querySelector('#dataTable tbody');
+    tbody.innerHTML = '';
+    dataList.forEach((item, index) => {
+      const umurPiutang = hitungUmurPiutang(item.jatuhTempo, item.tanggalPembayaran);
+      const kategori = kategoriAging(umurPiutang);
+
+      const tr = document.createElement('tr');
+      if (kategori === 'Macet') tr.classList.add('macet');
+      tr.innerHTML = `
+        <td>${index + 1}</td>
+        <td>${formatDate(item.tanggal)}</td>
+        <td>${item.kodePelanggan}</td>
+        <td>${item.namaPelanggan}</td>
+        <td>${formatDate(item.tanggalInvoice)}</td>
+        <td>${formatDate(item.jatuhTempo)}</td>
+        <td>${formatDate(item.tanggalPembayaran)}</td>
+        <td>${formatRupiah(item.nilaiPiutang)}</td>
+        <td>${item.status}</td>
+        <td>${umurPiutang}</td>
+        <td>${kategori}</td>
+        <td>
+          <button onclick="editData(${index})">Edit</button>
+          <button onclick="deleteData(${index})">Hapus</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Hitung umur piutang (hari)
+  function hitungUmurPiutang(jatuhTempo, tanggalPembayaran) {
+    const jt = new Date(jatuhTempo);
+    const tp = tanggalPembayaran ? new Date(tanggalPembayaran) : new Date();
+    const diffTime = tp - jt;
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 ? diffDays : 0;
+  }
+
+  // Kategori aging
+  function kategoriAging(umur) {
+    if (umur <= 30) return 'Lancar';
+    if (umur <= 60) return 'Perhatian';
+    if (umur <= 90) return 'Kewaspadaan';
+    return 'Macet';
+  }
+
+  // Format tanggal (DD-MM-YYYY)
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return '';
+    return d.toLocaleDateString('id-ID');
+  }
+
+  // Format Rupiah
+  function formatRupiah(num) {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(num);
+  }
+
+  // Tampilkan form tambah data
+  function showAddForm() {
+    document.getElementById('formTitle').innerText = 'Tambah Data';
+    document.getElementById('editIndex').value = -1;
+    document.getElementById('dataForm').reset();
+    document.getElementById('formContainer').style.display = 'block';
+  }
+
+  // Sembunyikan form
+  function hideForm() {
+    document.getElementById('formContainer').style.display = 'none';
+  }
+
+  // Submit form tambah/edit
+  async function submitForm(event) {
+    event.preventDefault();
+
+    const index = +document.getElementById('editIndex').value;
+    const data = {
+      tanggal: document.getElementById('tanggal').value,
+      kodePelanggan: document.getElementById('kodePelanggan').value,
+      namaPelanggan: document.getElementById('namaPelanggan').value,
+      tanggalInvoice: document.getElementById('tanggalInvoice').value,
+      jatuhTempo: document.getElementById('jatuhTempo').value,
+      tanggalPembayaran: document.getElementById('tanggalPembayaran').value,
+      nilaiPiutang: Number(document.getElementById('nilaiPiutang').value),
+      status: document.getElementById('status').value
+    };
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: index < 0 ? 'add' : 'edit', index, data }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.success) {
+        await fetchData();
+        hideForm();
+      } else {
+        alert('Gagal menyimpan data.');
+      }
+    } catch (error) {
+      alert('Gagal mengirim data ke server.');
+      console.error(error);
+    }
+  }
+
+  // Edit data
+  function editData(index) {
+    const item = dataList[index];
+    document.getElementById('formTitle').innerText = 'Edit Data';
+    document.getElementById('editIndex').value = index;
+    document.getElementById('tanggal').value = item.tanggal || '';
+    document.getElementById('kodePelanggan').value = item.kodePelanggan || '';
+    document.getElementById('namaPelanggan').value = item.namaPelanggan || '';
+    document.getElementById('tanggalInvoice').value = item.tanggalInvoice || '';
+    document.getElementById('jatuhTempo').value = item.jatuhTempo || '';
+    document.getElementById('tanggalPembayaran').value = item.tanggalPembayaran || '';
+    document.getElementById('nilaiPiutang').value = item.nilaiPiutang || 0;
+    document.getElementById('status').value = item.status || '';
+    document.getElementById('formContainer').style.display = 'block';
+  }
+
+  // Delete data
+  async function deleteData(index) {
+    if (!confirm('Yakin ingin menghapus data ini?')) return;
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'delete', index }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.success) {
+        await fetchData();
+      } else {
+        alert('Gagal menghapus data.');
+      }
+    } catch (error) {
+      alert('Gagal mengirim data ke server.');
+      console.error(error);
+    }
+  }
+
+  // Filter tabel berdasarkan pencarian dan status
+  function filterTable() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const statusFilter = document.getElementById('statusFilter').value;
+    const tbody = document.querySelector('#dataTable tbody');
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const kode = tr.cells[2].textContent.toLowerCase();
+      const nama = tr.cells[3].textContent.toLowerCase();
+      const status = tr.cells[8].textContent;
+      const matchSearch = kode.includes(search) || nama.includes(search);
+      const matchStatus = (statusFilter === 'semua' || status === statusFilter);
+      tr.style.display = (matchSearch && matchStatus) ? '' : 'none';
+    });
+  }
+
+  // Export tabel ke Excel
+  function exportToExcel() {
+    let table = document.getElementById('dataTable');
+    let html = table.outerHTML;
+    let url = 'data:application/vnd.ms-excel,' + encodeURIComponent(html);
+    let a = document.createElement('a');
+    a.href = url;
+    a.download = 'aging_piutang.xls';
+    a.click();
+  }
+
+  // Render grafik aging (menggunakan Chart.js)
+  function renderChart() {
+    const kategoriCount = { 'Lancar': 0, 'Perhatian': 0, 'Kewaspadaan': 0, 'Macet': 0 };
+    dataList.forEach(item => {
+      const umurPiutang = hitungUmurPiutang(item.jatuhTempo, item.tanggalPembayaran);
+      const kategori = kategoriAging(umurPiutang);
+      kategoriCount[kategori]++;
+    });
+
+    // Hapus canvas lama kalau ada
+    const chartContainer = document.getElementById('chartContainer');
+    chartContainer.innerHTML = '<canvas id="agingChart"></canvas>';
+    const ctx = document.getElementById('agingChart').getContext('2d');
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Lancar', 'Perhatian', 'Kewaspadaan', 'Macet'],
+        datasets: [{
+          label: 'Jumlah Piutang',
+          data: [
+            kategoriCount['Lancar'],
+            kategoriCount['Perhatian'],
+            kategoriCount['Kewaspadaan'],
+            kategoriCount['Macet']
+          ],
+          backgroundColor: ['#4caf50', '#ffeb3b', '#ff9800', '#f44336']
+        }]
+      },
+      options: {
+        scales: {
+          y: { beginAtZero: true, precision:0 }
+        }
+      }
+    });
+  }
+
+  // Inisialisasi saat halaman dimuat
+  window.onload = fetchData;
+</script>
+</body>
+</html>
